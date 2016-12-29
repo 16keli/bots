@@ -200,7 +200,7 @@ local tableSituationalItems = {
 function ItemPurchaseThink()
 
   local npcBot = GetBot();
-  --Ensure we have our core items bought first
+  --[[Ensure we have our core items bought first
   if (#tableCoreItems ~= 0) then
     --If we're in trouble, then buy out the cheapest items
     if (#GetNearbyHeros(1000, true, BOT_MODE_NONE) >= 2 and GetHealth()/GetMaxHealth() <= .2) then
@@ -215,21 +215,21 @@ function ItemPurchaseThink()
     else
 
     end
-  end
-  if ( #tableItemsToBuy == 0 )
+  end--]]
+  if ( #tableCoreItems == 0 )
   then
     npcBot:SetNextItemPurchaseValue( 0 );
     return;
   end
 
-  local sNextItem = tableItemsToBuy[1];
+  local sNextItem = tableCoreItems[1];
 
   npcBot:SetNextItemPurchaseValue( GetItemCost( sNextItem ) );
 
   if ( npcBot:GetGold() >= GetItemCost( sNextItem ) )
   then
     npcBot:Action_PurchaseItem( sNextItem );
-    table.remove( tableItemsToBuy, 1 );
+    table.remove( tableCoreItems, 1 );
   end
 
 end

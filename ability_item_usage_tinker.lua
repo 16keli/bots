@@ -21,26 +21,26 @@ function AbilityUsageThink()
 	abilityRearm = npcBot:GetAbilityByName("tinker_rearm");
 
 	-- Consider using each ability
-	castLBDesire, castLBTarget = ConsiderLagunaBlade();
-	castLSADesire, castLSALocation = ConsiderLightStrikeArray();
-	castDSDesire, castDSLocation = ConsiderDragonSlave();
-
-	if ( castLBDesire > castLSADesire and castLBDesire > castDSDesire ) 
-	then
-		npcBot:Action_UseAbilityOnEntity( abilityLB, castLBTarget );
-		return;
+	castLaserDesire, castLaserTarget = considerLaser();
+	castMissilesDesire = considerMissiles();
+	castMarchDesire, castMarchLocation = considerMarch();
+	castRearmDesire = considerRearm();
+	
+	-- Cast missiles first cuz of the 0 cast time
+	if (castMissilesDesire > 0) then
+		npcBot:Action_UseAbility(abilityMissiles);
+	end
+	
+	if (castLaserDesire > 0) then
+		npcBot:Action_UseAbilityOnEntity(abilityLaser, castLaserTarget);
+	end
+	
+	if (castMarchDesire > 0) then
+		npcBot:Action_UseAbilityOnLocation(abilityMarch, castMarchLocation);
 	end
 
-	if ( castLSADesire > 0 ) 
-	then
-		npcBot:Action_UseAbilityOnLocation( abilityLSA, castLSALocation );
-		return;
-	end
-
-	if ( castDSDesire > 0 ) 
-	then
-		npcBot:Action_UseAbilityOnLocation( abilityDS, castDSLocation );
-		return;
+	if (castRearmDesire > 0) then
+		npcBot:Action_UseAbility(abilityRearm);
 	end
 
 end
@@ -53,6 +53,7 @@ end
 
 -- Checks if we can laser this target to blind him by returning the unit to laser to do it or nil if we cannot
 function canBlindTarget(npcTarget)
+	-- Unsure about this check. Perhaps it becomes less relevant with Aghs, as the bounce does so much anyways
 	if (npcTarget:IsUnableToMiss()) then
 		return nil;
 	end
@@ -86,9 +87,25 @@ function canBlindTarget(npcTarget)
 	return nil;
 end
 
+-- Gets the location to cast march on based on the "enemy center" that we want to catch
+function getMarchLocation(enemyCenter)
+	-- Now modify it so that they will be marching (hah get it) into march to get to Tinker's position
+	local relativeVector = enemyCenter - npcBot:GetLocation();
+	local rotateOne = Vector(relativeVector.y, -relativeVector.x);
+	local rotateTwo = Vector(-relativeVector.y, relativeVector.x);
+	-- We want to cast in the direction that faces more towards the map, so we use the dot product to determine that
+	local dotOne = rotateOne:Dot(npcBot:GetLocation());
+	local dotTwo = rotateTwo:Dot(npcBot:GetLocation());
+	if (dotOne > dotTwo) then
+		return npcBot:GetLocation() + rotateTwo;
+	else
+		return npcBot:GetLocation() + rotateOne;
+	end
+end
 
-----------------------------------------------------------------------------------------------------
 
+-- Ability casting considerations ----------------------------------------------------------------------------
+-- General consideration for casting Tinker's laser
 function considerLaser()
 
 	local npcBot = GetBot();
@@ -98,8 +115,8 @@ function considerLaser()
 		return BOT_ACTION_DESIRE_NONE, 0;
 	end;
 
-	local nCastRange = abilityLaser:GetCastRange();
-	local nDamage = abilityLaser:GetAbilityDamage();
+	local castRange = abilityLaser:GetCastRange();
+	local damage = abilityLaser:GetAbilityDamage();
 
 	--------------------------------------
 	-- Global high-priorty usage
@@ -108,6 +125,7 @@ function considerLaser()
 	-- Save self or allies from enemies with high physical damage output or do massive damage in a teamfight
 	-- TODO add maybe a saving team consideration
 	if (util:isTeamfightHappeningNearby(1200)) then
+		-- Save allies and stuff
 		local dangerousEnemy = util:mostDangerousNearbyEnemy(1200, DAMAGE_TYPE_PHYSICAL);
 		if (dangerousEnemy ~= nil) then
 			local targetEnemy = canBlindTarget(dangerousEnemy);
@@ -122,60 +140,12 @@ function considerLaser()
 	-- Mode based usage
 	--------------------------------------
 
-	-- If we're farming and can kill 3+ creeps with LSA
-	if ( npcBot:GetActiveMode() == BOT_MODE_FARM ) then
-		local locationAoE = npcBot:FindAoELocation( true, false, npcBot:GetLocation(), nCastRange, nRadius, 0, nDamage );
-
-		if ( locationAoE.count >= 3 ) then
-			return BOT_ACTION_DESIRE_LOW, locationAoE.targetloc;
-		end
-	end
-
-	-- If we're pushing or defending a lane and can hit 4+ creeps, go for it
-	if ( npcBot:GetActiveMode() == BOT_MODE_PUSH_TOWER_TOP or
-		 npcBot:GetActiveMode() == BOT_MODE_PUSH_TOWER_MID or
-		 npcBot:GetActiveMode() == BOT_MODE_PUSH_TOWER_BOTTOM or
-		 npcBot:GetActiveMode() == BOT_MODE_DEFEND_TOWER_TOP or
-		 npcBot:GetActiveMode() == BOT_MODE_DEFEND_TOWER_MID or
-		 npcBot:GetActiveMode() == BOT_MODE_DEFEND_TOWER_BOTTOM ) 
-	then
-		local locationAoE = npcBot:FindAoELocation( true, false, npcBot:GetLocation(), nCastRange, nRadius, 0, 0 );
-
-		if ( locationAoE.count >= 4 ) 
-		then
-			return BOT_ACTION_DESIRE_LOW, locationAoE.targetloc;
-		end
-	end
-
-	-- If we're seriously retreating, see if we can land a stun on someone who's damaged us recently
-	if ( npcBot:GetActiveMode() == BOT_MODE_RETREAT and npcBot:GetActiveModeDesire() >= BOT_MODE_DESIRE_HIGH ) 
-	then
-		local tableNearbyEnemyHeroes = npcBot:GetNearbyHeroes( nCastRange + nRadius + 200, true, BOT_MODE_NONE );
-		for _,npcEnemy in pairs( tableNearbyEnemyHeroes )
-		do
-			if ( npcBot:WasRecentlyDamagedByHero( npcEnemy, 2.0 ) ) 
-			then
-				if ( CanCastLightStrikeArrayOnTarget( npcEnemy ) ) 
-				then
-					return BOT_ACTION_DESIRE_MODERATE, npcEnemy:GetLocation();
-				end
-			end
-		end
-	end
-
-	-- If we're going after someone
-	if ( npcBot:GetActiveMode() == BOT_MODE_ROAM or
-		 npcBot:GetActiveMode() == BOT_MODE_TEAM_ROAM or
-		 npcBot:GetActiveMode() == BOT_MODE_GANK or
-		 npcBot:GetActiveMode() == BOT_MODE_DEFEND_ALLY ) 
-	then
-		local npcTarget = npcBot:GetTarget();
-
-		if ( npcTarget ~= nil ) 
-		then
-			if ( CanCastLightStrikeArrayOnTarget( npcTarget ) )
-			then
-				return BOT_ACTION_DESIRE_HIGH, npcTarget:GetLocation();
+	-- If we're farming, in a dangerous area, and can kill a creep with laser
+	if (npcBot:GetActiveMode() == BOT_MODE_FARM) then
+		local nearbyCreeps = npcBot:GetNearbyCreeps(castRange, true);
+		for _,creep in pairs(nearbyCreeps) do
+			if (creep:GetHealth() <= damage) then
+				return BOT_ACTION_DESIRE_LOW, creep;
 			end
 		end
 	end
@@ -185,125 +155,98 @@ end
 
 ----------------------------------------------------------------------------------------------------
 
+-- General consideration for casting Tinker's "heat seaking" missiles
 function considerMissiles()
 
 	local npcBot = GetBot();
 
 	-- Make sure it's castable
-	if ( not abilityDS:IsFullyCastable() ) then 
-		return BOT_ACTION_DESIRE_NONE, 0;
+	if (not abilityMissiles:IsFullyCastable()) then 
+		return BOT_ACTION_DESIRE_NONE;
 	end;
 
-	-- If we want to cast Laguna Blade at all, bail
-	if ( castLBDesire > 0 ) then
-		return BOT_ACTION_DESIRE_NONE, 0;
-	end
-
 	-- Get some of its values
-	local nRadius = abilityDS:GetSpecialValueInt( "dragon_slave_width_end" );
-	local nCastRange = abilityDS:GetCastRange();
-	local nDamage = abilityDS:GetAbilityDamage();
+	local castRange = abilityMissiles:GetCastRange();
+	local damage = npcBot:GetActualDamage(abilityMissiles:GetAbilityDamage(), DAMAGE_TYPE_MAGICAL);
 
 	--------------------------------------
-	-- Mode based usage
+	-- Global high-priorty usage
 	--------------------------------------
 
-	-- If we're farming and can kill 3+ creeps with LSA
-	if ( npcBot:GetActiveMode() == BOT_MODE_FARM ) then
-		local locationAoE = npcBot:FindAoELocation( true, false, npcBot:GetLocation(), nCastRange, nRadius, 0, nDamage );
-
-		if ( locationAoE.count >= 3 ) then
-			return BOT_ACTION_DESIRE_LOW, locationAoE.targetloc;
-		end
-	end
-
-	-- If we're pushing or defending a lane and can hit 4+ creeps, go for it
-	if ( npcBot:GetActiveMode() == BOT_MODE_PUSH_TOWER_TOP or
-		 npcBot:GetActiveMode() == BOT_MODE_PUSH_TOWER_MID or
-		 npcBot:GetActiveMode() == BOT_MODE_PUSH_TOWER_BOTTOM or
-		 npcBot:GetActiveMode() == BOT_MODE_DEFEND_TOWER_TOP or
-		 npcBot:GetActiveMode() == BOT_MODE_DEFEND_TOWER_MID or
-		 npcBot:GetActiveMode() == BOT_MODE_DEFEND_TOWER_BOTTOM ) 
-	then
-		local locationAoE = npcBot:FindAoELocation( true, false, npcBot:GetLocation(), nCastRange, nRadius, 0, 0 );
-
-		if ( locationAoE.count >= 4 ) 
-		then
-			return BOT_ACTION_DESIRE_LOW, locationAoE.targetloc;
-		end
-	end
-
-	-- If we're going after someone
-	if ( npcBot:GetActiveMode() == BOT_MODE_ROAM or
-		 npcBot:GetActiveMode() == BOT_MODE_TEAM_ROAM or
-		 npcBot:GetActiveMode() == BOT_MODE_GANK or
-		 npcBot:GetActiveMode() == BOT_MODE_DEFEND_ALLY ) 
-	then
-		local npcTarget = npcBot:GetTarget();
-
-		if ( npcTarget ~= nil ) 
-		then
-			if ( CanCastDragonSlaveOnTarget( npcTarget ) )
-			then
-				return BOT_ACTION_DESIRE_MODERATE, npcEnemy:GetLocation();
+	-- We only really use these if we're teamfighting or to get kills
+	-- If we can finish off an enemy with these, then fire!
+	local validTargets = 0;
+	local nearbyEnemies = npcBot:GetNearbyHeroes(castRange, true, BOT_MODE_NONE);
+	for _,enemy in pairs(nearbyEnemies) do
+		-- TODO account for HP Regen and missile travel time? That may be a bit much
+		if (util:isVulnerable(enemy)) then
+			if (enemy:GetHealth() <= damage * .9) then
+				return BOT_ACTION_DESIRE_HIGH;
 			end
+			validTargets = validTargets + 1;
+		end
+	end
+	-- Otherwise, check how many we can hit right now
+	if (npcBot:HasScepter()) then
+		if (validTargets >= 3) then
+			return BOT_ACTION_DESIRE_HIGH;
+		end
+	else
+		if (validTargets >= 2) then
+			return BOT_ACTION_DESIRE_HIGH;
 		end
 	end
 
-	return BOT_ACTION_DESIRE_NONE, 0;
+	return BOT_ACTION_DESIRE_NONE;
 
 end
 
 
 ----------------------------------------------------------------------------------------------------
 
+-- General consideration for casting Tinker's March of the Machines
 function considerMarch()
 
 	local npcBot = GetBot();
 
 	-- Make sure it's castable
-	if ( not abilityLB:IsFullyCastable() ) then 
+	if (not abilityMarch:IsFullyCastable()) then 
 		return BOT_ACTION_DESIRE_NONE, 0;
 	end
 
 	-- Get some of its values
-	local nCastRange = abilityLB:GetCastRange();
-	local nDamage = abilityDS:GetSpecialValueInt( "damage" );
-	local eDamageType = npcBot:HasScepter() and DAMAGE_TYPE_PURE or DAMAGE_TYPE_MAGICAL;
+	local castRange = abilityMarch:GetCastRange();
+	local castPoint = abilityMarch:GetCastPoint();
+	local range = abilityMarch:GetSpecialValueInt("distance") / 2;
 
-	-- If a mode has set a target, and we can kill them, do it
-	local npcTarget = npcBot:GetTarget();
-	if ( npcTarget ~= nil and CanCastLagunaBladeOnTarget( npcTarget ) )
-	then
-		if ( npcTarget:GetActualDamage( nDamage, eDamageType ) > npcTarget:GetHealth() and UnitToUnitDistance( npcTarget, npcBot ) < ( nCastRange + 200 ) )
-		then
-			return BOT_ACTION_DESIRE_HIGH, npcTarget;
-		end
+	--------------------------------------
+	-- Global high-priorty usage
+	--------------------------------------
+	
+	-- If there's a teamfight, cast march such that the machines will cut off the enemy. This will have to take into consideration map bounds, relative location, and all that fun stuff
+	if (util:isTeamfightHappeningNearby(1200)) then
+		-- Vector from current position to the center of their team
+		local enemyCenter = npcBot:FindAOELocation(true, true, npcBot:GetLocation(), castRange, range, castPoint, 0);
+		return BOT_ACTION_DESIRE_MODERATE, getMarchLocation(enemyCenter.targetLoc);
 	end
-
-	-- If we're in a teamfight, use it on the scariest enemy
-	local tableNearbyAttackingAlliedHeroes = npcBot:GetNearbyHeroes( 1000, false, BOT_MODE_ATTACK );
-	if (#tableNearbyAttackingAlliedHeroes >= 2) then
-		local npcMostDangerousEnemy = nil;
-		local nMostDangerousDamage = 0;
-
-		local tableNearbyEnemyHeroes = npcBot:GetNearbyHeroes( nCastRange, true, BOT_MODE_NONE );
-		for _,npcEnemy in pairs( tableNearbyEnemyHeroes )
-		do
-			if ( CanCastLagunaBladeOnTarget( npcEnemy ) )
-			then
-				local nDamage = npcEnemy:GetEstimatedDamageToTarget( false, npcBot, 3.0, DAMAGE_TYPE_ALL );
-				if ( nDamage > nMostDangerousDamage )
-				then
-					nMostDangerousDamage = nDamage;
-					npcMostDangerousEnemy = npcEnemy;
-				end
-			end
-		end
-
-		if ( npcMostDangerousEnemy ~= nil )
-		then
-			return BOT_ACTION_DESIRE_HIGH, npcMostDangerousEnemy;
+	
+	--------------------------------------
+	-- Mode based usage
+	--------------------------------------
+	
+	-- If we're farming or pushing, then we also want to march to help out
+	if (npcBot:GetActiveMode() == BOT_MODE_FARM or
+		npcBot:GetActiveMode() == BOT_MODE_PUSH_TOWER_TOP or
+		npcBot:GetActiveMode() == BOT_MODE_PUSH_TOWER_MID or
+		npcBot:GetActiveMode() == BOT_MODE_PUSH_TOWER_BOTTOM or
+		npcBot:GetActiveMode() == BOT_MODE_DEFEND_TOWER_TOP or
+		npcBot:GetActiveMode() == BOT_MODE_DEFEND_TOWER_MID or
+		npcBot:GetActiveMode() == BOT_MODE_DEFEND_TOWER_BOTTOM) then
+		local enemyCenter = npcBot:FindAOELocation(true, false, npcBot:GetLocation(), castRange, range, castPoint, 200);
+		if (enemyCenter.count >= 2) then
+			return BOT_ACTION_DESIRE_LOW, getMarchLocation(enemyCenter.targetLoc);
+		else
+			return BOT_ACTION_DESIRE_NONE, 0;
 		end
 	end
 
@@ -311,7 +254,9 @@ function considerMarch()
 
 end
 
+-- General consideration for casting Tinker's Rearm
 function considerRearm()
-
+	local itemBoTs = util:getItem("item_travel_boots");
+	local itemBlink = util:getItem("item_blink");
 end
 

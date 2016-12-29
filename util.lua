@@ -79,6 +79,34 @@ function M:mostDangerousNearbyEnemy(range, damage)
 	end
 end
 
+-- Item utilities ------------------------------------------------------------------------
+
+-- Retrieves the item in question or nil if the bot does not own it
+function M:getItem(name)
+	local npcBot = GetBot();
+	if (hasItem(name)) then
+		return npcBot:GetItemInSlot(getItemSlot(name));
+	else
+		return nil;
+	end
+end
+
+-- Checks the slot this bot has this item in, and returns it or -1 if it does not have it
+function M:getItemSlot(name)
+	local npcBot = GetBot();
+	for i = 0, 5 do
+		if (npcBot:GetItemInSlot(i):GetName() == name) then
+			return i;
+		end
+	end
+	return -1;
+end
+
+-- Checks whether this bot owns this item
+function M:hasItem(name)
+	return getItemSlot(name) ~= -1;
+end
+
 -- General utilities ---------------------------------------------------------------------
 
 -- Checks whether this unit is vulnerable to most spells and items
@@ -108,6 +136,28 @@ function M:getEnemyTeamMembers()
 		enemies[i] = GetTeamMember(getEnemyTeamEnum, i);
 	end
 	return enemies;
+end
+
+-- Gets the number of visible enemy heroes
+function M:getVisibleEnemyHeroes()
+	local visible = 0;
+	for _,enemy in pairs(getEnemyTeamMembers()) do
+		if (enemy:CanBeSeen()) then
+			visible = visible + 1;
+		end
+	end
+	return visible;
+end
+
+-- Returns the "Danger Value" of this location
+function M:getDangerAtLocation(location)
+	local danger = 0;
+	for _,enemy in pairs(getEnemyTeamMembers()) do
+		if (not enemy:CanBeSeen()) then
+			danger = danger + 1 + 1000 / (LocationToLocationDistance(location, enemy:GetLastSeenLocation())) + enemy:GetTimeSinceLastSeen() / 10;
+		end
+	end
+	return danger;
 end
 
 -- Is this even Dota anymore ------------------------------------------------------------
