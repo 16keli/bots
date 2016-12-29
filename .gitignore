@@ -1,6 +1,10 @@
 # Compiled Lua sources
 luac.out
 
+animation/
+bots_example/
+game/
+
 # luarocks build files
 *.src.rock
 *.zip
