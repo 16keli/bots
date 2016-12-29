@@ -79,6 +79,7 @@ function M:mostDangerousNearbyEnemy(range, damage)
 			npcMostDangerousEnemy = npcEnemy;
 		end
 	end
+	return npcMostDangerousEnemy;
 end
 
 -- Item utilities ------------------------------------------------------------------------

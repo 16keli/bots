@@ -28,26 +28,39 @@ function AbilityUsageThink()
 	
 	-- Cast missiles first cuz of the 0 cast time
 	if (castMissilesDesire > 0) then
-		npcBot:Action_UseAbility(abilityMissiles);
-		return;
-	end
-	
-	-- Rearm trumps these abilities, but do not waste rearm
-	if (castRearmDesire > castLaserDesire and castRearmDesire > castMarchDesire and castRearmDesire > BOT_ACTION_DESIRE_LOW) then
-		npcBot:Action_UseAbility(abilityRearm);
-		lastRearm = GameTime();
-		return;
+		if (not abilityMissiles:IsCooldownReady()) then
+			castRearmDesire = castRearmDesire + .05;
+		else
+			considerSoulRing();
+			npcBot:Action_UseAbility(abilityMissiles);
+		end
 	end
 	
 	-- Then laser and march
 	if (castLaserDesire > 0) then
-		npcBot:Action_UseAbilityOnEntity(abilityLaser, castLaserTarget);
-		return;
+		if (not abilityLaser:IsCooldownReady()) then
+			castRearmDesire = castRearmDesire + .05;
+		else
+			considerSoulRing();
+			npcBot:Action_UseAbilityOnEntity(abilityLaser, castLaserTarget);
+		end
 	end
 	
 	if (castMarchDesire > 0) then
-		npcBot:Action_UseAbilityOnLocation(abilityMarch, castMarchLocation);
-		return;
+		if (not abilityMarch:IsCooldownReady()) then
+			castRearmDesire = castRearmDesire + .05;
+		else
+			considerSoulRing();
+			npcBot:Action_UseAbilityOnLocation(abilityMarch, castMarchLocation);
+		end
+	end
+	
+	-- Do not waste rearm!
+	if (castRearmDesire > castLaserDesire and castRearmDesire > castMarchDesire and castRearmDesire > BOT_ACTION_DESIRE_LOW) then
+		considerSoulRing();
+		npcBot:Action_UseAbility(abilityRearm);
+		lastRearm = GameTime();
+		npcBot:Action_Chat("Last rearm time was "..lastRearm, false);
 	end
 end
 
@@ -67,7 +80,7 @@ function canBlindTarget(npcTarget)
 	local castRange = abilityLaser:GetCastRange();
 	local castPoint = abilityLaser:GetCastPoint();
 	-- Simple, aghs-independent blinding is just a simple check
-	if (UnitToUnitDistance(npcBot, npcTarget:GetLocation()) <= castRange) then
+	if (GetUnitToUnitDistance(npcBot, npcTarget) <= castRange) then
 		return npcTarget;
 	end
 	if (npcBot:HasScepter()) then
@@ -80,7 +93,7 @@ function canBlindTarget(npcTarget)
 		local minTarget = nil;
 		for _,enemy in pairs(initialTargets) do
 			-- We only perform checks for one jump cuz I'm lazy af
-			local dist = UnitToUnitDistance(enemy, npcTarget:GetLocation());
+			local dist = GetUnitToUnitDistance(enemy, npcTarget);
 			if (dist < minDist) then
 				minDist = dist;
 				minTarget = enemy;
@@ -93,26 +106,50 @@ function canBlindTarget(npcTarget)
 	return nil;
 end
 
--- Gets the location to cast march on based on the "enemy center" that we want to catch
-function getMarchLocation(enemyCenter)
-	-- Test code please ignore
+-- Gets the location to cast march on in order to zone enemies the best, or nil if not applicable
+function getMarchZoningLocation()
 	local npcBot = GetBot();
-	DebugDrawLine(npcBot:GetLocation(), enemyCenter, 255, 0, 0);
-	return enemyCenter;
-	--[[
-	-- Now modify it so that they will be marching (hah get it) into march to get to Tinker's position
-	local relativeVector = enemyCenter - npcBot:GetLocation();
-	local rotateOne = Vector(relativeVector.y, -relativeVector.x);
-	local rotateTwo = Vector(-relativeVector.y, relativeVector.x);
-	-- We want to cast in the direction that faces more towards the map, so we use the dot product to determine that
-	local dotOne = rotateOne:Dot(npcBot:GetLocation());
-	local dotTwo = rotateTwo:Dot(npcBot:GetLocation());
-	if (dotOne > dotTwo) then
-		return npcBot:GetLocation() + rotateTwo;
+	-- Get some of its values
+	local castRange = abilityMarch:GetCastRange();
+	local range = abilityMarch:GetSpecialValueInt("distance") / 2;
+	-- Get all enemies within radius of Tinker
+	local nearbyEnemies = npcBot:GetNearbyHeroes(castRange + range, true, BOT_MODE_NONE);
+	local centerVector = Vector(0, 0);
+	if (#nearbyEnemies ~= 0) then
+		-- Sum the relative vectors to get an average relative vector
+		for _,enemy in pairs(nearbyEnemies) do
+			centerVector = centerVector + (enemy:GetLocation() - npcBot:GetLocation()) + 2 * enemy:GetVelocity();
+		end
+		local norm = centerVector:Normalized();
+		local targetVector = Vector(norm.x * castRange, norm.y * castRange);
+		DebugDrawLine(npcBot:GetLocation(), npcBot:GetLocation() + targetVector, 255, 0, 0);
+		return npcBot:GetLocation() + targetVector;
 	else
-		return npcBot:GetLocation() + rotateOne;
+		return nil;
 	end
-	--]]
+end
+
+-- Gets the location to cast march on in order to farm creeps the best, or nil if not applicable, as well as the number of creeps nearby
+function getMarchFarmingLocation()
+	local npcBot = GetBot();
+	-- Get some of its values
+	local castRange = abilityMarch:GetCastRange();
+	local range = abilityMarch:GetSpecialValueInt("distance") / 2;
+	-- Get all enemies within radius of Tinker
+	local nearbyEnemies = npcBot:GetNearbyCreeps(castRange + range, true);
+	local centerVector = Vector(0, 0);
+	if (#nearbyEnemies ~= 0) then
+		-- Sum the relative vectors to get an average relative vector
+		for _,enemy in pairs(nearbyEnemies) do
+			centerVector = centerVector + (enemy:GetLocation() - npcBot:GetLocation()) + 2 * enemy:GetVelocity();
+		end
+		local norm = centerVector:Normalized();
+		local targetVector = Vector(norm.x * castRange, norm.y * castRange);
+		DebugDrawLine(npcBot:GetLocation(), npcBot:GetLocation() + targetVector, 255, 0, 0);
+		return #nearbyEnemies, npcBot:GetLocation() + targetVector;
+	else
+		return 0, nil;
+	end
 end
 
 
@@ -121,11 +158,6 @@ end
 function considerLaser()
 
 	local npcBot = GetBot();
-
-	-- Make sure it's castable
-	if (not abilityLaser:IsFullyCastable()) then 
-		return BOT_ACTION_DESIRE_NONE, 0;
-	end;
 
 	local castRange = abilityLaser:GetCastRange();
 	local damage = npcBot:GetActualDamage(abilityLaser:GetSpecialValueFloat("laser_damage"), DAMAGE_TYPE_PURE);
@@ -140,10 +172,8 @@ function considerLaser()
 	if (util:isTeamfightHappeningNearby(1200)) then
 		-- Save allies and stuff
 		local dangerousEnemy = util:mostDangerousNearbyEnemy(1200, DAMAGE_TYPE_PHYSICAL);
-		npcBot:Action_Chat("Most dangerous enemy is "..dangerousEnemy, false);
 		if (dangerousEnemy ~= nil) then
 			local targetEnemy = canBlindTarget(dangerousEnemy);
-			npcBot:Action_Chat("I should laser "..targetEnemy, false);
 			if (targetEnemy ~= nil) then
 				npcBot:Action_Chat("I'll save you!", false);
 				return BOT_ACTION_DESIRE_HIGH, targetEnemy;
@@ -160,7 +190,7 @@ function considerLaser()
 		end
 		-- Then do the damage
 		if (enemy:GetHealth() < damage) then
-			npcBot:Action_Chat("Pew pew pew", true);
+			npcBot:Action_Chat("Pew pew pew!", true);
 			return BOT_ACTION_DESIRE_HIGH, enemy;
 		end
 	end
@@ -190,11 +220,6 @@ function considerMissiles()
 
 	local npcBot = GetBot();
 
-	-- Make sure it's castable
-	if (not abilityMissiles:IsFullyCastable()) then 
-		return BOT_ACTION_DESIRE_NONE;
-	end;
-
 	-- Get some of its values
 	local castRange = 1600;
 	local damage = npcBot:GetActualDamage(abilityMissiles:GetAbilityDamage(), DAMAGE_TYPE_MAGICAL);
@@ -208,7 +233,6 @@ function considerMissiles()
 	local validTargets = 0;
 	local nearbyEnemies = npcBot:GetNearbyHeroes(castRange, true, BOT_MODE_NONE);
 	if (#nearbyEnemies > 0) then
-		npcBot:Action_Chat("Oh my... "..#nearbyEnemies.." enemies eh?", false);
 		for _,enemy in pairs(nearbyEnemies) do
 			-- TODO account for HP Regen and missile travel time? That may be a bit much
 			if (util:isVulnerable(enemy)) then
@@ -223,12 +247,12 @@ function considerMissiles()
 		if (npcBot:HasScepter()) then
 			if (validTargets >= 3) then
 				npcBot:Action_Chat("I see you!", true);
-				return BOT_ACTION_DESIRE_HIGH;
+				return BOT_ACTION_DESIRE_MODERATE;
 			end
 		else
 			if (validTargets >= 2) then
 				npcBot:Action_Chat("I see you!", true);
-				return BOT_ACTION_DESIRE_HIGH;
+				return BOT_ACTION_DESIRE_MODERATE;
 			end
 		end
 	end
@@ -250,22 +274,17 @@ function considerMarch()
 		return BOT_ACTION_DESIRE_NONE, 0;
 	end
 
-	-- Get some of its values
-	local castRange = abilityMarch:GetCastRange();
-	--local castPoint = abilityMarch:GetCastPoint();
-	local castPoint = 0;
-	local range = abilityMarch:GetSpecialValueInt("distance") / 2;
-
 	--------------------------------------
 	-- Global high-priorty usage
 	--------------------------------------
 	
 	-- If there's a teamfight, cast march such that the machines will cut off the enemy. This will have to take into consideration map bounds, relative location, and all that fun stuff
 	if (util:isTeamfightHappeningNearby(1200)) then
-		-- Vector from current position to the center of their team
-		local enemyCenter = npcBot:FindAoELocation(true, true, npcBot:GetLocation(), 100, range, castPoint, 0);
-		npcBot:Action_Chat("Marching to zone", false);
-		return BOT_ACTION_DESIRE_MODERATE, getMarchLocation(enemyCenter.targetloc);
+		local zoningLocation = getMarchZoningLocation();
+		if (zoningLocation ~= nil) then
+			npcBot:Action_Chat("Marching to zone", false);
+			return BOT_ACTION_DESIRE_MODERATE, zoningLocation;
+		end
 	end
 	
 	--------------------------------------
@@ -280,10 +299,10 @@ function considerMarch()
 		npcBot:GetActiveMode() == BOT_MODE_DEFEND_TOWER_TOP or
 		npcBot:GetActiveMode() == BOT_MODE_DEFEND_TOWER_MID or
 		npcBot:GetActiveMode() == BOT_MODE_DEFEND_TOWER_BOTTOM) then
-		local enemyCenter = npcBot:FindAoELocation(true, false, npcBot:GetLocation(), 100, range, castPoint, 0);
-		if (enemyCenter.count >= 2) then
+		local creepCount, farmingLocation = getMarchFarmingLocation();
+		if (creepCount >= 3) then
 			npcBot:Action_Chat("Marching to farm", false);
-			return BOT_ACTION_DESIRE_LOW, getMarchLocation(enemyCenter.targetloc);
+			return BOT_ACTION_DESIRE_LOW, farmingLocation;
 		else
 			return BOT_ACTION_DESIRE_NONE, 0;
 		end
@@ -295,9 +314,10 @@ end
 
 -- General consideration for casting Tinker's Rearm
 function considerRearm()
-	-- Prevent the fateful multi-rearm
+	-- Prevent the fateful multi-rearm by accounting for the cast point of rearm
 	if (lastRearm ~= nil) then
-		if (GameTime() - lastRearm < abilityRearm:GetChannelTime() + .25) then
+		npcBot:Action_Chat("Attempting rearm at "..GameTime());
+		if ((GameTime() - lastRearm) < (abilityRearm:GetChannelTime() + abilityRearm:GetCastPoint() + .05)) then
 			return BOT_ACTION_DESIRE_NONE;
 		end
 	end
@@ -326,7 +346,7 @@ end
 function considerSoulRing()
 	local npcBot = GetBot();
 	local soulRing = util:getItem("item_soul_ring");
-	if (soulRing ~= nil and soulRing:IsFullyCastable() and npcBot:GetHealth() / npcBot:GetMaximumHealth() > .4) then
+	if (soulRing ~= nil and soulRing:IsFullyCastable() and npcBot:GetHealth() / npcBot:GetMaxHealth() > .4) then
 		npcBot:Action_UseAbility(soulRing);
 	end
 end
