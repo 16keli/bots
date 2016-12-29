@@ -46,14 +46,14 @@ end
 -- Checks whether we are being ganked
 -- Takes same args as beingGankedChance()
 function M:isBeingGanked(range, time)
-	return beingGankedChance(range, time) >= .35;
+	return M:beingGankedChance(range, time) >= .35;
 end
 
 -- Checks whether we are in danger of dying. Like the function name implies.
 -- Specifically checks whether we were damanged recently, whether we're being ganked, and whether our HP or HP proportion is low.
 function M:isInDangerOfDying(time)
 	local npcBot = GetBot();
-	return npcBot:TimeSinceDamagedByAnyHero() <= time and isBeingGanked() and ((npcBot:GetHealth() / npcBot:GetMaximumHealth()) <= .25 or (npcBot:GetHealth() <= 400));
+	return npcBot:TimeSinceDamagedByAnyHero() <= time and M:isBeingGanked() and ((npcBot:GetHealth() / npcBot:GetMaximumHealth()) <= .25 or (npcBot:GetHealth() <= 400));
 end
 
 
@@ -61,12 +61,14 @@ end
 
 -- Checks whether there is a teamfight going on nearby by checking for the amount of allies attacking in a given range
 function M:isTeamfightHappeningNearby(range)
+	local npcBot = GetBot();
 	local tableNearbyAttackingAlliedHeroes = npcBot:GetNearbyHeroes(range, false, BOT_MODE_ATTACK);
 	return #tableNearbyAttackingAlliedHeroes >= 2;
 end
 
 -- Checks for the most dangerous enemy within a given range, using the specified damage type
 function M:mostDangerousNearbyEnemy(range, damage)
+	local npcBot = GetBot();
 	local npcMostDangerousEnemy = nil;
 	local nMostDangerousDamage = 0;
 	local tableNearbyEnemyHeroes = npcBot:GetNearbyHeroes(range, true, BOT_MODE_NONE);
@@ -84,8 +86,8 @@ end
 -- Retrieves the item in question or nil if the bot does not own it
 function M:getItem(name)
 	local npcBot = GetBot();
-	if (hasItem(name)) then
-		return npcBot:GetItemInSlot(getItemSlot(name));
+	if (M:hasItem(name)) then
+		return npcBot:GetItemInSlot(M:getItemSlot(name));
 	else
 		return nil;
 	end
@@ -95,8 +97,10 @@ end
 function M:getItemSlot(name)
 	local npcBot = GetBot();
 	for i = 0, 5 do
-		if (npcBot:GetItemInSlot(i):GetName() == name) then
-			return i;
+		if (npcBot:GetItemInSlot(i) ~= nil) then
+			if (npcBot:GetItemInSlot(i):GetName() == name) then
+				return i;
+			end
 		end
 	end
 	return -1;
@@ -104,19 +108,19 @@ end
 
 -- Checks whether this bot owns this item
 function M:hasItem(name)
-	return getItemSlot(name) ~= -1;
+	return M:getItemSlot(name) ~= -1;
 end
 
 -- General utilities ---------------------------------------------------------------------
 
 -- Checks whether this unit is vulnerable to most spells and items
 function M:isVulnerable(npcTarget)
-	return isPiercingVulnerable(npcTarget) and not npcTarget:IsMagicImmune();
+	return M:isPiercingVulnerable(npcTarget) and not npcTarget:IsMagicImmune();
 end
 
 -- Checks whether this unit is vulnerable to spells and items that pierce magic immunity
 function M:isPiercingVulnerable(npcTarget)
-	npcTarget:CanBeSeen() and not npcTarget:IsInvulnerable();
+	return npcTarget:CanBeSeen() and not npcTarget:IsInvulnerable();
 end
 
 -- Gets the enemy team's enum
@@ -133,7 +137,7 @@ function M:getEnemyTeamMembers()
 	enemies = {};
 	for i = 1, 5 do
 		-- I hope the arguments are in the right order
-		enemies[i] = GetTeamMember(getEnemyTeamEnum, i);
+		enemies[i] = GetTeamMember(M:getEnemyTeamEnum(), i);
 	end
 	return enemies;
 end
@@ -141,7 +145,7 @@ end
 -- Gets the number of visible enemy heroes
 function M:getVisibleEnemyHeroes()
 	local visible = 0;
-	for _,enemy in pairs(getEnemyTeamMembers()) do
+	for _,enemy in pairs(M:getEnemyTeamMembers()) do
 		if (enemy:CanBeSeen()) then
 			visible = visible + 1;
 		end
@@ -152,7 +156,7 @@ end
 -- Returns the "Danger Value" of this location
 function M:getDangerAtLocation(location)
 	local danger = 0;
-	for _,enemy in pairs(getEnemyTeamMembers()) do
+	for _,enemy in pairs(M:getEnemyTeamMembers()) do
 		if (not enemy:CanBeSeen()) then
 			danger = danger + 1 + 1000 / (LocationToLocationDistance(location, enemy:GetLastSeenLocation())) + enemy:GetTimeSinceLastSeen() / 10;
 		end
